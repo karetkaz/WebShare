@@ -1,0 +1,9 @@
+html=text/html; charset=UTF-8
+htm=text/html; charset=UTF-8
+css=text/css; charset=UTF-8
+js=application/javascript; charset=UTF-8
+json=application/json; charset=UTF-8
+mp4=video/mp4
+png=image/png
+gif=image/gif
+jpg=image/jpeg

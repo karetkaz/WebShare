@@ -1,0 +1,236 @@
+<html>
+<head>
+	<title>WebShare</title>
+	<style>
+		body {
+			width:100%;
+			margin: auto;
+			display: block;
+		}
+		div, p, ul, h1, h2, h3, h4, h5, img { margin:0px; padding:0px; }
+		.clear {clear: both;}
+		.right {float: right;}
+		.left {float: left;}
+
+		.toolbar {
+			background-color: #eaeaea;
+			padding: 8 10 8 10;
+		}
+		.toolbar >* {
+			display: block;
+			margin: 0 4 0 0;
+		}
+		.toolbar .toolgroup {
+			padding-left: 40px;
+		}
+		.toolbar textarea {
+			margin-top: 10px;
+			width: 100%;
+		}
+		#hideIfNoSelection {
+			display: none;
+		}
+
+		.error {
+			background-color: #fbe3e4;
+			color:#8a1f3a;
+			padding: 8 10 8 10;
+		}
+
+		.content {
+			height: 25px;
+			font-size: 25;
+			background-color: #fafafa;
+			padding: 8 10 8 10;
+		}
+		.content.odd {
+			background-color: #efefef;
+		}
+
+		.colCheck {
+			float: left;
+			width: 21px;
+			height: 21px;
+			margin-right: 1em;
+		}
+
+		.content .right {
+			margin-left: 20px;
+			display: block;
+			text-align: right;
+			overflow: hidden;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+		}
+
+		.colName {
+			display: block;
+			width: auto;
+			overflow: hidden;
+		}
+	</style>
+	<script>
+		function isNullOrEmpty(str) {
+			return str === null || str === "";
+		}
+		function selectcb(value) {
+			var checkboxes = document.getElementsByClassName('colCheckSel');
+			if (value === true || value === false) {
+				for (var i = 1; i < checkboxes.length; i++) {
+					checkboxes[i].checked = value;
+				}
+			}
+			else if (value !== null) {
+				var anyChecked = false;
+				for (var i = 1; i < checkboxes.length; i++) {
+					if (checkboxes[i].checked) {
+						anyChecked = true;
+						break;
+					}
+				}
+				checkboxes[0].checked = anyChecked;
+			}
+
+			var filenames = "";
+			var selected = 0;
+			for (var i = 1; i < checkboxes.length; i++) {
+				if (checkboxes[i].checked) {
+					if (filenames !== "") {
+						filenames += '/';
+					}
+					filenames += checkboxes[i].value;
+					selected += 1;
+				}
+			}
+
+			document.getElementById('toSubmit').value = filenames;
+			if (selected > 0) {
+				document.getElementById('hideIfNoSelection').style.display = "inline";
+				document.getElementById('toolbarMessage').innerText = selected + " files selected";
+			}
+			else {
+				document.getElementById('hideIfNoSelection').style.display = "none";
+				var location = window.location;
+				var path = '<a href="/"/>root</a>';
+				var href = document.location.href.replace(/\/*$/, '');
+
+				var s = href.split("/");
+				for (var i = 3; i < s.length; i++) {
+					if (i > 2) {
+						path += ' / ';
+					}
+					var aref = href.substring(0, href.indexOf('/' + s[i]) + s[i].length + 1);
+					if (i === s.length - 1) {
+						path += '<a href="javascript:window.location.reload();">' + s[i] + '</a>';
+					}
+					else {
+						path += '<a href="' + aref + '/">' + s[i] + '</a>';
+					}
+				}
+
+				document.getElementById('toolbarMessage').innerHTML = path;
+			}
+		}
+		function onSubmit(node) {
+			document.getElementById('toSubmit').name = node.value.toLowerCase();
+		}
+		function mkdirSubmit(node) {
+			var name = window.prompt("Enter Folder name:", "New Folder");
+			if (name !== null) {
+				document.getElementById('toSubmit').value = name;
+				onSubmit(node);
+			}
+		}
+		function delSubmit(node) {
+			var toSubmit = document.getElementById('toSubmit');
+			if (!isNullOrEmpty(toSubmit.value)) {
+				var selection = ('/' + toSubmit.value).replace(/\//g, '\n    ');
+				var confirm = window.confirm("Confirm to delete: " + selection);
+				if (confirm === true) {
+					return onSubmit(node);
+				}
+				else {
+					toSubmit.name = "";
+				}
+			}
+		}
+		function uploadSubmit() {
+			var name = document.getElementById('filename');
+			var file = document.getElementById('filedata');
+			var content = document.getElementById('editContent');
+
+			if (file.type !== "hidden" && file.files.length == 0) {
+				content.style.display = "inline";
+				file.type = "hidden";
+				name.type = "text";
+				return false;
+			}
+			if (file.type === "hidden") {
+				if (name.value.length === 0) {
+					name.value = content.value.match(/[^ \t\n]?([^\n]+)/)[0].trim() + '.txt';
+					console.log(name.value);
+				}
+				file.value = content.value;
+			}
+			return true;
+		}
+
+		function dirSubmit() {
+			var node = document.getElementById('toSubmit');
+			if (isNullOrEmpty(node.name))
+				return false;
+			return !isNullOrEmpty(node.value);
+		}
+	</script>
+</head>
+<body id="dropFileUpload" onload="selectcb(null);">
+<div class="toolbar">
+<form id="fileUpload" class="right" method="POST" onsubmit="return uploadSubmit();" enctype="multipart/form-data">
+	<input type="submit" value="Upload">
+	<input name="filename" id="filename" type="hidden">
+	<input name="filedata" id="filedata" type="file" multiple>
+</form>
+<form class="toolgroup right" method="POST" onsubmit="return dirSubmit();">
+	<span id="hideIfNoSelection">
+		<input type="submit" onclick="onSubmit(this);" value="Download">
+		<input type="submit" onclick="delSubmit(this);" value="Delete">
+	</span>
+	<input type="submit" onclick="mkdirSubmit(this);" value="Mkdir">
+	<input type="hidden" id="toSubmit" name="" value="">
+</form>
+<input class="colCheck colCheckSel left" type="checkbox" onchange="selectcb(this.checked);"/>
+<span id="toolbarMessage">files selected</span>
+<span class="clear"></span>
+<textarea id="editContent" rows="10" style="display: none;"></textarea>
+</div>
+<!--.errorRow--><div class="error"><span>Error: <.message/></span></div><!--./errorRow-->
+<!--.fileRowFile-->
+<div class="content<.oddRow= odd/>">
+	<input class="colCheck colCheckSel" type="checkbox" onchange="selectcb(this);" value="<.href/>"/>
+	<span class="right"><.date/></span>
+	<a class="right" href="<.href/>?download"><.size/></a>
+	<a class="colName" href="<.href/>"><.name/></a>
+</div><!--./fileRowFile-->
+
+<script>
+document.getElementById("filedata").onProgress = function() {
+	console.log(arguments);
+}
+with(document.getElementById("dropFileUpload")) {
+	ondragover = function (e) {
+		return false;
+	};
+	ondragend = function (e) {
+		return false;
+	};
+	ondrop = function (e) {
+		e.preventDefault();
+		filedata.files = e.dataTransfer.files;
+		fileUpload.submit();
+		return true;
+	}
+}
+</script>
+
+</body>
+</html>
