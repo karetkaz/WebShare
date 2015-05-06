@@ -23,7 +23,7 @@ cd ..
 jar cvfe "server.jar" WebShare "lib/sceye-fi.jar" -C out/ .
 
 :runserver
-java -jar server.jar -port 8080 "%WORKDIR%"
+java -jar server.jar -write -port 8080 "%WORKDIR%"
 
 :: use as a file caching proxy: save locally all visited pages will
 rem SET REPO="https://qmlbook.github.io"
