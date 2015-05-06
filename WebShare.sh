@@ -23,7 +23,7 @@ then
 fi
 
 
-xfce4-terminal -x java -jar server.jar -port 8080 "$WORKDIR"
+java -jar server.jar -port 8080 "$WORKDIR"
 
 #~ use as a file caching proxy: save locally all visited pages will
 #SET REPO="https://qmlbook.github.io"
