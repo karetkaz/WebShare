@@ -26,5 +26,5 @@ fi
 java -jar server.jar -port 8080 "$WORKDIR"
 
 #~ use as a file caching proxy: save locally all visited pages will
-#SET REPO="https://qmlbook.github.io"
+#REPO="https://qmlbook.github.io"
 #java -cp server.jar HttpFileProxy -port 8080 -repo $REPO "$WORKDIR"

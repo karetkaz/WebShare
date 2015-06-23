@@ -112,22 +112,26 @@
 				document.getElementById('hideIfNoSelection').style.display = "none";
 				var location = window.location;
 				var path = '<a href="/"/>root</a>';
-				var href = document.location.href.replace(/\/*$/, '');
+				var href = document.location.pathname.replace(/\/+/g, '/').replace(/\/*$/, '');
 
 				var s = href.split("/");
-				for (var i = 3; i < s.length; i++) {
-					if (i > 2) {
-						path += ' / ';
-					}
+				for (var i = 1; i < s.length; i++) {
 					var aref = href.substring(0, href.indexOf('/' + s[i]) + s[i].length + 1);
+					var folder = decodeURIComponent(s[i]);
 					if (i === s.length - 1) {
-						path += '<a href="javascript:window.location.reload();">' + s[i] + '</a>';
+						path += '/<a href="javascript:window.location.reload();">' + folder + '</a>';
 					}
 					else {
-						path += '<a href="' + aref + '/">' + s[i] + '</a>';
+						path += '/<a href="' + aref + '/">' + folder + '</a>';
 					}
 				}
 
+				if (document.location.href.endsWith("?recursive")) {
+					path += ' : <a href="' + document.location.origin + document.location.pathname + '">Tree</a>';
+				}
+				else {
+					path += ' : <a href="' + document.location.href + '?recursive">Flat</a>';
+				}
 				document.getElementById('toolbarMessage').innerHTML = path;
 			}
 		}

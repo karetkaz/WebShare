@@ -15,11 +15,11 @@ import java.util.regex.Pattern;
 /**
  * Template engine
  * a template can contain blocks and variables:
- * <.name/>                             // simple variable
- * <.name=…/>                          // simple variable with default value
- * <!--.name/-->                        // hidden template variable
- * <!--.name=…/-->                     // hidden template variable with default value
- * <!--.name-->…<!--./name-->          // block variable with visible template content
+ * <.name/>                      // simple variable
+ * <.name=…/>                    // simple variable with default value
+ * <!--.name/-->                 // hidden template variable
+ * <!--.name=…/-->               // hidden template variable with default value
+ * <!--.name-->…<!--./name-->    // block variable with visible template content
  *
  */
 public class HtmlTemplate {
