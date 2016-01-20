@@ -1,5 +1,7 @@
-import java.io.File;
+package kmz.webshare;
+
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.StringWriter;
 import java.io.Writer;
 import java.text.ParseException;
@@ -20,7 +22,7 @@ import java.util.regex.Pattern;
  * <!--.name/-->                 // hidden template variable
  * <!--.name=…/-->               // hidden template variable with default value
  * <!--.name-->…<!--./name-->    // block variable with visible template content
- *
+ * TODO: javadoc
  */
 public class HtmlTemplate {
 	private static final boolean debugMode = false;
@@ -32,107 +34,16 @@ public class HtmlTemplate {
 	private StringBuffer value = null;
 	private String defValue = null;
 
-	public HtmlTemplate(File html) {
-		try {
-			parse(templateBlock.matcher(Utils.toString(html)));
-		}
-		catch (Exception e) {
-			this.value = new StringBuffer(e.toString());
-		}
+	public HtmlTemplate() {
 	}
 
 	private HtmlTemplate(String value) {
 		if (value != null) {
 			this.value = new StringBuffer(value);
 		}
-		else {
-			this.value = null;
-		}
 	}
 
-	// set a variable
-	public void set(String key, String value, boolean recursive) {
-		if (this.blocks.containsKey(key)) {
-			for (HtmlTemplate var : this.blocks.get(key)) {
-				if (value == null) {
-					var.value = new StringBuffer(var.defValue);
-				}
-				else {
-					var.value = new StringBuffer(value);
-				}
-			}
-		}
-		if (recursive) {
-			for (HtmlTemplate vars : this.content) {
-				vars.set(key, value, true);
-			}
-		}
-	}
-
-	// set a variable
-	public void set(String key, String value) {
-		set(key, value, false);
-	}
-
-	public void set(String key, boolean visible) {
-		//set(key, visible ? null : "", false);
-		List<HtmlTemplate> result = this.blocks.get(key);
-		if (result != null) {
-			for (HtmlTemplate template : result) {
-				template.value = visible ? new StringBuffer(template.defValue) : null;
-			}
-		}
-	}
-
-	/*/ set block visibility
-	public void show(String key, boolean visible) {
-		List<HtmlTemplate> result = this.blocks.get(key);
-		if (result != null) {
-			for (HtmlTemplate template : result) {
-				template.value = visible ? new StringBuffer(template.defValue) : null;
-			}
-		}
-	}*/
-
-	// add a block
-	public HtmlTemplate add(String key) {
-		List<HtmlTemplate> blocks = this.blocks.get(key);
-		if (blocks == null || blocks.size() != 1) {
-			return null;
-		}
-
-		HtmlTemplate template = blocks.get(0);
-		if (template.value != null) {
-			// flush previous values.
-			template.append(template.value);
-		}
-		else {
-			template.value = new StringBuffer();
-		}
-		return template;
-	}
-
-	public void clean() {
-		if (this.content != null) {
-			for (HtmlTemplate blocks : this.content) {
-				blocks.clean(true);
-			}
-		}
-	}
-
-	private void clean(boolean recursive) {
-		if (this.content != null) {
-			if (recursive) {
-				for (HtmlTemplate blocks : this.content) {
-					blocks.clean(true);
-				}
-			}
-			this.value = null;
-		}
-	}
-
-	private void parse(Matcher matcher) throws ParseException {
-
+	public void parse(InputStream stream) throws ParseException {
 		class ScopeStack {
 
 			class Entry {
@@ -190,6 +101,8 @@ public class HtmlTemplate {
 		}
 
 		ScopeStack stack = new ScopeStack(this);
+		String fileContent = Utils.coalesce(Utils.readStream(stream), "");
+		Matcher matcher = templateBlock.matcher(fileContent);
 
 		while (matcher.find()) {
 
@@ -249,6 +162,77 @@ public class HtmlTemplate {
 			throw new ParseException("unclosed block: " + blockName, 0);
 		}
 		this.value = new StringBuffer();
+	}
+
+	// set a variable
+	public void set(String key, String value, boolean recursive) {
+		if (this.blocks.containsKey(key)) {
+			for (HtmlTemplate var : this.blocks.get(key)) {
+				if (value == null) {
+					var.value = new StringBuffer(var.defValue);
+				}
+				else {
+					var.value = new StringBuffer(value);
+				}
+			}
+		}
+		if (recursive) {
+			for (HtmlTemplate vars : this.content) {
+				vars.set(key, value, true);
+			}
+		}
+	}
+
+	// set a variable
+	public void set(String key, String value) {
+		set(key, value, false);
+	}
+
+	public void set(String key, boolean visible) {
+		//set(key, visible ? null : "", false);
+		List<HtmlTemplate> result = this.blocks.get(key);
+		if (result != null) {
+			for (HtmlTemplate template : result) {
+				template.value = visible ? new StringBuffer(template.defValue) : null;
+			}
+		}
+	}
+
+	// add a block
+	public HtmlTemplate add(String key) {
+		List<HtmlTemplate> blocks = this.blocks.get(key);
+		if (blocks == null || blocks.size() != 1) {
+			return null;
+		}
+
+		HtmlTemplate template = blocks.get(0);
+		if (template.value != null) {
+			// flush previous values.
+			template.append(template.value);
+		}
+		else {
+			template.value = new StringBuffer();
+		}
+		return template;
+	}
+
+	public void reset() {
+		if (this.content != null) {
+			for (HtmlTemplate blocks : this.content) {
+				blocks.reset(true);
+			}
+		}
+	}
+
+	private void reset(boolean recursive) {
+		if (this.content != null) {
+			if (recursive) {
+				for (HtmlTemplate blocks : this.content) {
+					blocks.reset(true);
+				}
+			}
+			this.value = null;
+		}
 	}
 
 	private void append(StringBuffer sb) {

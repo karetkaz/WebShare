@@ -96,7 +96,7 @@
 			for (var i = 1; i < checkboxes.length; i++) {
 				if (checkboxes[i].checked) {
 					if (filenames !== "") {
-						filenames += '/';
+						filenames += '\n';
 					}
 					filenames += checkboxes[i].value;
 					selected += 1;
@@ -148,7 +148,7 @@
 		function delSubmit(node) {
 			var toSubmit = document.getElementById('toSubmit');
 			if (!isNullOrEmpty(toSubmit.value)) {
-				var selection = ('/' + toSubmit.value).replace(/\//g, '\n    ');
+				var selection = ('\n' + toSubmit.value).replace(/\n/g, '\n    ');
 				var confirm = window.confirm("Confirm to delete: " + selection);
 				if (confirm === true) {
 					return onSubmit(node);

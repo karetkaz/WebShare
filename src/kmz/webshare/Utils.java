@@ -1,4 +1,7 @@
+package kmz.webshare;
+
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -7,7 +10,6 @@ import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -101,8 +103,14 @@ public class Utils {
 		}
 	}
 
-	public static String toString(File file) throws IOException {
-		return readStream(new FileInputStream(file));
+	public static void close(Closeable closeable) {
+		if (closeable == null)
+			return;
+		try {
+			closeable.close();
+		}
+		catch (Exception ignore) {
+		}
 	}
 
 
@@ -156,8 +164,8 @@ public class Utils {
 
 	public static String base64Decode(String orig) {
 		char[] chars = orig.toCharArray();
-		StringBuffer sb = new StringBuffer();
-		int i = 0;
+		StringBuilder sb = new StringBuilder();
+		int i;
 
 		int shift = 0;
 		int acc = 0;
@@ -182,7 +190,7 @@ public class Utils {
 		return sb.toString();
 	}
 
-	public static long addToArchive(ZipOutputStream out, String prefix, File file) {
+	public static void addToArchive(ZipOutputStream out, String prefix, File file) {
 		if (Utils.isNullOrEmpty(prefix)) {
 			prefix = file.getName();
 		} else {
@@ -190,7 +198,6 @@ public class Utils {
 		}
 
 		FileInputStream src = null;
-		long size = 0;
 		try {
 			if (file.isDirectory()) {
 				File[] files = file.listFiles();
@@ -198,7 +205,7 @@ public class Utils {
 					throw new IOException("Can not list content of: " + file.getPath());
 				}
 				for (File item : files) {
-					size += addToArchive(out, prefix, item);
+					addToArchive(out, prefix, item);
 				}
 			} else {
 				src = new FileInputStream(file);
@@ -206,11 +213,10 @@ public class Utils {
 				Utils.copyStream(out, src);
 				out.closeEntry();
 				out.flush();
-				size += file.length();
 			}
-		} catch (Exception e) {
-			HttpServer.log(e, "Error archiving: `%s`", file.getPath());
-		} finally {
+		}
+		catch (Exception e) {}
+		finally {
 			if (src != null) {
 				try {
 					src.close();
@@ -219,7 +225,6 @@ public class Utils {
 				}
 			}
 		}
-		return size;
 	}
 
 	interface FileProcessor {

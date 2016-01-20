@@ -1,49 +1,99 @@
-import com.sun.net.httpserver.HttpExchange;
+package kmz.webshare;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
-import java.util.zip.ZipOutputStream;
 
 public class WebShare extends HttpServer {
 
-	public static final String DOWNLOAD = "download";
-	public static final String RECURSIVE = "recursive";
+	private static final String DOWNLOAD = "download";
+	private static final String RECURSIVE = "recursive";
 
-	public static final String POST_CMD_MK_DIR = "mkdir";
-	public static final String POST_CMD_DELETE = "delete";
+	private static final String POST_CMD_MK_DIR = "mkdir";
+	private static final String POST_CMD_DELETE = "delete";
 
-	public static final String POST_CMD_FILENAME = "filename";
-	public static final String POST_CMD_FILEDATA = "filedata";
+	private static final String POST_CMD_FILENAME = "filename";
+	private static final String POST_CMD_FILEDATA = "filedata";
 
-	public static void main(String[] args) throws IOException {
+	private static final String FILE_MIME_MAP = "mime.map";
+	private static final String FILE_TEMPLATE = "FileList.html";
+
+	private static File logFile = null;
+
+	public static void log(Throwable error, String message, Object... args) {
+		if (message != null) {
+			System.out.printf(message, args).println();
+		}
+		if (error != null) {
+			error.printStackTrace(System.out);
+		}
+
+		//*TODO:
+		PrintWriter log = null;
+		if (logFile != null) {
+			try {
+				log = new PrintWriter(new FileOutputStream(logFile, true));
+				if (message != null) {
+					log.printf(message, args).println();
+				}
+				if (error != null) {
+					error.printStackTrace(log);
+				}
+			}
+			catch (IOException e) {
+				e.printStackTrace();
+			}
+			finally {
+				if (log != null) {
+					log.close();
+				}
+			}
+		}
+	}
+
+	public static void log(String message, Object... args) {
+		log(null, message, args);
+	}
+
+	public static void log(Throwable error) {
+		log(error, null);
+	}
+
+	public static void main(String[] args) throws IOException, ParseException {
 		String host = "http://localhost";
 		int port = 8090;
-		String wdir = ".";
-
-		boolean readOnly = true;
+		String directory = ".";
 		String auth = null;
+		String repoUrl = null;
+		boolean readOnly = true;
 
 		int threads = 256;
 
 		if (args.length > 0) {
 			int arg;
 			for (arg = 0; arg < args.length - 1; arg += 1) {
-				if ("-host".equals(args[arg])) {
+				if ("-repo".equals(args[arg])) {
+					if ((arg += 1) < args.length) {
+						repoUrl = args[arg];
+					}
+				}
+				else if ("-host".equals(args[arg])) {
 					if ((arg += 1) < args.length) {
 						host = args[arg];
 					}
@@ -58,11 +108,11 @@ public class WebShare extends HttpServer {
 						auth = args[arg];
 					}
 				}
-				/*else if ("-log".equals(args[arg])) {
+				else if ("-log".equals(args[arg])) {
 					if ((arg += 1) < args.length) {
 						logFile = new File(args[arg]);
 					}
-				}*/
+				}
 				else if ("-n".equals(args[arg])) {
 					if ((arg += 1) < args.length) {
 						threads = Integer.parseInt(args[arg]);
@@ -79,69 +129,111 @@ public class WebShare extends HttpServer {
 			if (arg < args.length) {
 				String path = args[arg].trim();
 				if (!path.isEmpty()) {
-					wdir = path;
+					directory = path;
+					if (directory.startsWith("~/")) {
+						directory = System.getProperty("user.home") + directory.substring(1);
+					}
 				}
 			}
-		}
+			final File root = new File(directory).getCanonicalFile();
 
-		final File root = new File(wdir).getCanonicalFile();
-
-		com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress(port), 0);
-		server.createContext("/", new WebShare(root, auth, readOnly));
-		if (threads > 0) {
-			server.setExecutor(Executors.newFixedThreadPool(threads));
+			com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress(port), 0);
+			if (repoUrl != null) {
+				server.createContext("/", new HttpFileProxy(new WebShare(root, auth, readOnly), repoUrl));
+			}
+			else {
+				server.createContext("/", new WebShare(root, auth, readOnly));
+			}
+			if (threads > 0) {
+				server.setExecutor(Executors.newFixedThreadPool(threads));
+			}
+			server.start();
+			log("Server started: %s:%s using %d threads in folder: `%s`", host, server.getAddress().getPort(), threads, root.getAbsolutePath());
 		}
-		server.start();
-		log("Server started: %s:%s using %d threads in folder: `%s`", host, server.getAddress().getPort(), threads, root.getAbsolutePath());
+		else {
+			new WebShareUi().setVisible(true);
+		}
 	}
 
 	private final File root;
 	private final String auth;
-	private final boolean readOnly;
-	private Set<String> authenticated = new HashSet<String>();
-	private final HtmlTemplate template = new HtmlTemplate(new File("FileList.html"));
+	public final boolean readOnly;
+	protected final Properties mimeMap;
+	protected final Properties headerMap;
+	private final HtmlTemplate template;
+	private Set<String> authenticatedUsers = new HashSet<String>();
 
-	public WebShare(File root, String auth, boolean readOnly) {
+	public WebShare(File root, String auth, boolean readOnly) throws ParseException {
 		this.root = root;
 		this.auth = auth;
 		this.readOnly = readOnly;
+		this.mimeMap = new Properties();
+		this.headerMap = new Properties();
+		this.template = new HtmlTemplate();
+
+		// load html template
+		try {
+			// try to load first from the
+			template.parse(new FileInputStream(FILE_TEMPLATE));
+		}
+		catch (IOException e) {
+			template.parse(getClass().getResourceAsStream("/" + FILE_TEMPLATE));
+		}
+
+		// customize mime types
+		try {
+			// load first from resource
+			this.mimeMap.load(getClass().getResourceAsStream("/" + FILE_MIME_MAP));
+		}
+		catch (Exception ignored) {}
+		try {
+			// update mime types with external file.
+			this.mimeMap.load(new FileInputStream(FILE_MIME_MAP));
+		}
+		catch (Exception ignored) {}
 	}
 
 	@Override
-	public void beginRequest(Request request) throws HttpServer.Error {
-		request.put(DOWNLOAD, null);
-		request.put(POST_CMD_FILENAME, null);
+	protected String getContentType(File file) {
+		String mimeType = null;
+		String fileName = file.getName();
+		int extPos = fileName.lastIndexOf('.');
+		if (extPos > 1) {
+			String ext = fileName.substring(extPos + 1).toLowerCase();
+			mimeType = mimeMap.getProperty(ext, null);
+		}
+		if (mimeType == null) {
+			mimeType = mimeMap.getProperty("*", null);
+			if (mimeType == null) {
+				mimeType = CONTENT_TYPE_TEXT_PLAIN_CHARSET;
+			}
+		}
+		return mimeType;
+	}
 
-		File file = request.getFile(root);
+	@Override
+	protected File getLocalPath(String path) {
+		if (this.root == null) {
+			return null;
+		}
+		return new File(this.root, path);
+	}
+
+	@Override
+	public File beginRequest(Request request) throws HttpServer.Error {
+		request.putExtra(DOWNLOAD, null);
+		request.putExtra(POST_CMD_FILENAME, null);
+
+		File file = request.getLocalPath();
 
 		// no favicon for this server.
-		if (request.path.equals("/favicon.ico")) {
+		/*if (request.path.equals("/favicon.ico")) {
+			//return;
 			throw new HttpServer.Error("No favicon");
-		}
+		}*/
 
-		String contentSize = request.context.getRequestHeaders().getFirst(CONTENT_LENGTH);
-		if (contentSize == null) {
-			if (file.isDirectory()) {
-				contentSize = "";
-			}
-			else {
-				contentSize = Utils.formatSize(file.length());
-			}
-		}
-		else {
-			try {
-				contentSize = Utils.formatSize(Long.parseLong(contentSize));
-			}
-			catch (Exception e) {
-				// leave content size what it is.
-			}
-		}
-		log("execute: %s[%s]: `%s`", request.method, contentSize, file.getAbsolutePath());
-
-		if (auth != null) {
-			// server is password protected.
-			this.enforceAuthenticated(request);
-		}
+		log("request: %s[%s]: `%s`", request.method, getContentLength(request, file), file.getAbsolutePath());
+		return null;
 	}
 
 	@Override
@@ -152,7 +244,7 @@ public class WebShare extends HttpServer {
 			}
 			String value = Utils.readStream(body);
 			if (!Utils.isNullOrEmpty(value)) {
-				File file = new File(request.getFile(root), value);
+				File file = new File(request.getLocalPath(), value);
 
 				if (file.exists()) {
 					throw new HttpServer.Error("File already exists.");
@@ -171,8 +263,8 @@ public class WebShare extends HttpServer {
 			}
 			String value = Utils.readStream(body);
 			if (!Utils.isNullOrEmpty(value)) {
-				for (String fileName : value.split("/")) {
-					File file = new File(request.getFile(root), fileName);
+				for (String fileName : value.split("\n")) {
+					File file = new File(request.getLocalPath(), fileName);
 
 					if (!file.exists()) {
 						throw new HttpServer.Error("File does not exists: " + file.getAbsolutePath());
@@ -189,39 +281,39 @@ public class WebShare extends HttpServer {
 		else if (DOWNLOAD.equals(name)) {
 			String value = Utils.readStream(body);
 			if (!Utils.isNullOrEmpty(value)) {
-				String[] files = value.split("/");
+				String[] files = value.split("\n");
 				List<File> toZip = new ArrayList<File>();
 
-				for (int i = 0; i < files.length; ++i) {
+				for (String file1 : files) {
 
 					// skip empty strings produced by: split("a//b/")
-					if (files[i] == null || files[i].isEmpty()) {
+					if (file1 == null || file1.isEmpty()) {
 						continue;
 					}
 
-					File file = new File(request.getFile(root), files[i]);
+					File file = new File(request.getLocalPath(), file1.trim());
 
 					if (!file.exists()) {
-						throw new HttpServer.Error("File does not exists: " + file.getAbsolutePath());
+						throw new java.lang.Error("File does not exists: " + file.getAbsolutePath());
 					}
 					toZip.add(file);
 				}
-				request.put(DOWNLOAD, toZip.toArray(new File[toZip.size()]));
+				request.putExtra(DOWNLOAD, toZip.toArray(new File[toZip.size()]));
 			}
 			else {
-				request.put(DOWNLOAD, new File[] { request.getFile(root) });
+				request.putExtra(DOWNLOAD, new File[] { request.getLocalPath() });
 			}
 		}
 
 		else if (RECURSIVE.equals(name)) {
-			if (!request.getFile(root).isDirectory()) {
+			if (!request.getLocalPath().isDirectory()) {
 				throw new HttpServer.Error("Must recurse directories.");
 			}
-			request.put(RECURSIVE, true);
+			request.putExtra(RECURSIVE, true);
 		}
 
 		else if (POST_CMD_FILENAME.equals(name)) {
-			request.put(POST_CMD_FILENAME, Utils.readStream(body));
+			request.putExtra(POST_CMD_FILENAME, Utils.readStream(body));
 		}
 
 		else if (POST_CMD_FILEDATA.equals(name)) {
@@ -232,13 +324,13 @@ public class WebShare extends HttpServer {
 			// params should never be null for upload.
 			String fileName = params.get("filename");
 			if (fileName == null) {
-				fileName = (String)request.get(POST_CMD_FILENAME);
+				fileName = (String)request.getExtra(POST_CMD_FILENAME);
 			}
 
 			if (fileName == null) {
 				fileName = UUID.randomUUID().toString();
 			}
-			File file = new File(request.getFile(root), fileName);
+			File file = new File(request.getLocalPath(), fileName);
 
 			if (file.exists()) {
 				throw new HttpServer.Error("File already exists.");
@@ -263,13 +355,10 @@ public class WebShare extends HttpServer {
 	}
 
 	@Override
-	public void writeResponse(Request request, Exception error) throws HttpServer.Error, IOException {
-		if (request.getFile(root) == null) {
-			throw new HttpServer.Error(404, "File not found", null);
-		}
+	public void writeResponse(Response response, Exception error) throws IOException {
+		File file = response.getLocalPath();
 
-		File file = request.getFile(root);
-		File[] download = (File[]) request.get(DOWNLOAD);
+		File[] download = (File[]) response.getExtra(DOWNLOAD);
 
 		// download requested.
 		if (download != null) {
@@ -282,8 +371,9 @@ public class WebShare extends HttpServer {
 					zipName = file.getName();
 				}
 				else {
-					// do not zip a single file.
-					downloadFile(request.context, file);
+					// do not zip a single file, just download it
+					response.setAttachment(file.getName());
+					response.write(file);
 					return;
 				}
 			}
@@ -292,12 +382,13 @@ public class WebShare extends HttpServer {
 				zipName = this.getClass().getSimpleName();
 			}
 
-			downloadFile(request.context, zipName + ".zip", download);
+			response.setAttachment(zipName + ".zip");
+			response.writeZip(download);
 			return;
 		}
 
 		if (file.isFile()) {
-			writeResponse(request, 200, file);
+			response.write(file);
 			return;
 		}
 
@@ -305,8 +396,8 @@ public class WebShare extends HttpServer {
 			error = new Exception("File not found");
 		}
 
-		template.clean();
-		if (request.get(RECURSIVE) != null) {
+		template.reset();
+		if (response.getExtra(RECURSIVE) != null) {
 			Utils.processFilesRecursive(".", file, new Utils.FileProcessor() {
 				int idx = 0;
 
@@ -375,85 +466,60 @@ public class WebShare extends HttpServer {
 			}
 		}
 
-		int responseCode = 200;
 		if (error != null) {
 			HtmlTemplate message = template.add("errorRow");
 			if (message != null) {
 				message.set("message", error.getMessage());
 			}
-			responseCode = 500;
+			response.setResponseCode(HttpURLConnection.HTTP_INTERNAL_ERROR);
 		}
-
-		writeResponse(request, responseCode, template);
+		response.write(template);
 	}
 
-	private static void downloadFile(HttpExchange context, final File file) throws IOException {
-		long size = file.length();
-		context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + file.getName());
-		context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_OCTET_STREAM);
-		context.sendResponseHeaders(200, size);
-
-		InputStream in = null;
-		try {
-			long time = System.currentTimeMillis();
-			OutputStream out = context.getResponseBody();
-			in = new FileInputStream(file);
-			Utils.copyStream(out, in);
-			time = System.currentTimeMillis() - time;
-			log("downloaded [%s @ %s]: `%s`", Utils.formatSize(size), Utils.formatSpeed(file.length(), time), file.getAbsolutePath());
-		} finally {
-			if (in != null) {
-				in.close();
-			}
-		}
-	}
-
-	private static void downloadFile(final HttpExchange context, final String zipFileName, final File... files) throws IOException {
-		context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + zipFileName);
-		context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_ARCHIVE_ZIP);
-		context.sendResponseHeaders(200, 0);
-
-		OutputStream out = context.getResponseBody();
-		ZipOutputStream zip = null;
-		long size = 0;
-		try {
-			long time = System.currentTimeMillis();
-			zip = new ZipOutputStream(out);
-			for (File toZip : files) {
-				size += Utils.addToArchive(zip, "", toZip);
-			}
-			time = System.currentTimeMillis() - time;
-			log("downloaded [%s @ %s]: `%s`", Utils.formatSize(size), Utils.formatSpeed(size, time), zipFileName);
-		} finally {
-			if (zip != null) {
-				zip.close();
-			}
-		}
-	}
-
-	private void enforceAuthenticated(HttpServer.Request request) throws HttpServer.Error {
-		HttpExchange context = request.context;
-		String remoteAddress = context.getRemoteAddress().getHostName();
-		if (authenticated.contains(remoteAddress)) {
-			return;
+	@Override
+	boolean isAuthenticated(Request request) {
+		if (this.auth == null) {
+			return true;
 		}
 
-		String authorization = context.getRequestHeaders().getFirst("authorization");
+		String remoteAddress = request.getRemoteAddress().getHostName();
+		if (authenticatedUsers.contains(remoteAddress)) {
+			return true;
+		}
+
+		String authorization = request.getFirstHeader("authorization");
 		if (authorization != null && authorization.startsWith("Basic ")) {
 			authorization = Utils.base64Decode(authorization.substring(6));
-			if (auth != null && auth.equals(authorization)) {
+			if (auth.equals(authorization)) {
 				int sep = authorization.indexOf(':');
 				String username = authorization.substring(0, sep);
 				String password = authorization.substring(sep + 1);
 				log("User authenticated: %s:%s@%s", username, password, remoteAddress);
-				authenticated.add(remoteAddress);
-				return;
+				authenticatedUsers.add(remoteAddress);
+				return true;
 			}
 		}
-
-		throw new HttpServer.Error(401, "401 Access denied", new HashMap<String, String>() {{
-			put("WWW-Authenticate", "Basic realm=\"Home Server\"");
-		}});
+		return false;
 	}
 
+	private static String getContentLength(Request request, File file) {
+		String contentSize = request.getFirstHeader(CONTENT_LENGTH);
+		if (contentSize == null) {
+			if (file.isDirectory()) {
+				contentSize = "";
+			}
+			else {
+				contentSize = Utils.formatSize(file.length());
+			}
+		}
+		else {
+			try {
+				contentSize = Utils.formatSize(Long.parseLong(contentSize));
+			}
+			catch (Exception e) {
+				// leave content size what it is.
+			}
+		}
+		return contentSize;
+	}
 }
