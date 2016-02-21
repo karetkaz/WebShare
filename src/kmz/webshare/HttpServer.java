@@ -73,16 +73,19 @@ public abstract class HttpServer implements HttpHandler {
 	}
 
 	protected class Response {
-		private final HttpExchange context;
 		private final Request request;
+		private final HttpExchange context;
+		private final Map<String, Object> extras;
 
 		private String attachment = null;
 		private String contentType = null;
 		private int responseCode = HttpURLConnection.HTTP_OK;
+		private boolean headersSent = false;
 		//public int reasonPhrase;
 
-		public Response(HttpExchange context, Request request) {
-			this.context = context;
+		public Response(Request request) {
+			this.context = request.context;
+			this.extras = request.extras;
 			this.request = request;
 		}
 
@@ -91,11 +94,11 @@ public abstract class HttpServer implements HttpHandler {
 		}
 
 		public Object getExtra(String key) {
-			return this.request.extras.get(key);
+			return this.extras.get(key);
 		}
 
 		public void putExtra(String key, Object value) {
-			this.request.extras.put(key, value);
+			this.extras.put(key, value);
 		}
 
 		public void setResponseCode(int responseCode) {
@@ -126,10 +129,15 @@ public abstract class HttpServer implements HttpHandler {
 			this.context.getResponseHeaders().put(key, Arrays.asList(values));
 		}
 
+		private void sendResponseHeaders(long responseLength) throws IOException {
+			this.context.sendResponseHeaders(this.responseCode, responseLength);
+			this.headersSent = true;
+		}
+
 		public void write(String string) throws IOException {
 			byte[] response = string.getBytes();
 			this.context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_TEXT_HTML_CHARSET);
-			this.context.sendResponseHeaders(this.responseCode, response.length);
+			this.sendResponseHeaders(response.length);
 			this.context.getResponseBody().write(response);
 		}
 
@@ -140,12 +148,12 @@ public abstract class HttpServer implements HttpHandler {
 			}
 			try {
 				if (this.attachment != null) {
-					request.context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + this.attachment);
+					context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + this.attachment);
 				}
-				request.context.getResponseHeaders().add(CONTENT_TYPE, this.contentType);
-				request.context.sendResponseHeaders(this.responseCode, file.length());
+				this.context.getResponseHeaders().add(CONTENT_TYPE, this.contentType);
+				this.sendResponseHeaders(file.length());
 
-				OutputStream out = request.context.getResponseBody();
+				OutputStream out = this.context.getResponseBody();
 				in = new FileInputStream(file);
 				Utils.copyStream(out, in);
 			}
@@ -156,14 +164,14 @@ public abstract class HttpServer implements HttpHandler {
 
 		public void writeZip(File... files) throws IOException {
 			if (this.attachment != null) {
-				request.context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + this.attachment);
+				this.context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + this.attachment);
 			}
-			request.context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_ARCHIVE_ZIP);
-			request.context.sendResponseHeaders(this.responseCode, 0);
+			this.context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_ARCHIVE_ZIP);
+			this.sendResponseHeaders(0);
 
 			ZipOutputStream out = null;
 			try {
-				out = new ZipOutputStream(request.context.getResponseBody());
+				out = new ZipOutputStream(this.context.getResponseBody());
 				for (File toZip : files) {
 					Utils.addToArchive(out, "", toZip);
 				}
@@ -174,10 +182,10 @@ public abstract class HttpServer implements HttpHandler {
 		}
 
 		public void write(HtmlTemplate template) throws IOException {
-			request.context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_TEXT_HTML_CHARSET);
-			request.context.sendResponseHeaders(this.responseCode, 0);
-			Writer out = new OutputStreamWriter(request.context.getResponseBody());
-			template.write(out);
+			this.context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_TEXT_HTML_CHARSET);
+			this.sendResponseHeaders(0);
+			Writer out = new OutputStreamWriter(this.context.getResponseBody());
+			template.append(out);
 			out.flush();
 		}
 	}
@@ -206,14 +214,14 @@ public abstract class HttpServer implements HttpHandler {
 	// Enforce to be authenticated.
 	abstract boolean isAuthenticated(Request request);
 
-	// starting a new request, return the file to be the returned, or null to process the request.
-	abstract File beginRequest(Request request) throws Error;
+	// starting a new request, return false to skip the request.
+	abstract boolean beginRequest(Request request) throws Error;
 
 	// process the request get and post params.
 	abstract void processParam(Request request, String name, InputStream value, Map<String, String> params) throws Error;
 
 	// handle write response to client.
-	abstract void writeResponse(Response response, Exception error) throws IOException;
+	abstract long writeResponse(Response response, Exception error) throws IOException;
 
 	public static final String REFERER = "Referer";
 
@@ -259,12 +267,13 @@ public abstract class HttpServer implements HttpHandler {
 
 	@Override
 	public void handle(final HttpExchange context) {
+		Exception error = null;
 		long requestStart = System.currentTimeMillis();
 		long responseStart = requestStart;
+		long responseLength = -1;
 		final Request request = new Request(context);
-		final Response response = new Response(context, request);
+		final Response response = new Response(request);
 		try {
-			Exception error = null;
 
 			if (!this.isAuthenticated(request)) {
 				response.putHeader("WWW-Authenticate", "Basic realm=\"Home Server\"");
@@ -273,16 +282,12 @@ public abstract class HttpServer implements HttpHandler {
 				return;
 			}
 
-			// prepare request.
-			File file = this.beginRequest(request);
-
-			// if the local file exists return it.
-			if (file != null && file.isFile()) {
-				response.write(file);
-				return;
-			}
-
 			try {
+				// begin request.
+				if (!this.beginRequest(request)) {
+					return;
+				}
+
 				// process query params first.
 				this.processParam(request, context.getRequestURI().getQuery());
 
@@ -330,36 +335,32 @@ public abstract class HttpServer implements HttpHandler {
 			}
 			catch (Exception e) {
 				error = e;
-				WebShare.log(e);
 			}
 
 			responseStart = System.currentTimeMillis();
-			this.writeResponse(response, error);
+			responseLength = this.writeResponse(response, error);
 		}
 		catch (Exception e) {
-			// send only error if exception was not thrown during sending response
-			if (responseStart == requestStart) {
+			/*// send only error if exception was not thrown before sending headers.
+			if (!response.headersSent) {
 				try {
-					if (e instanceof Error) {
-						response.setResponseCode(((Error) e).responseCode);
-					}
-					else {
-						response.setResponseCode(HttpURLConnection.HTTP_INTERNAL_ERROR);
-					}
+					response.setResponseCode(HttpURLConnection.HTTP_INTERNAL_ERROR);
 					response.write(e.getMessage());
 				}
 				catch (Exception e1) {
 					WebShare.log(e1);
 				}
-			}
-			WebShare.log(e);
+			}// */
+			//WebShare.log(e);
+			error = e;
 		}
 		finally {
 			context.close();
 			long now = System.currentTimeMillis();
 			String requestTime = Utils.formatTime(now - requestStart);
 			String responseTime = Utils.formatTime(now - responseStart);
-			WebShare.log("response in: [%s / %s]: `%s`", requestTime, responseTime, request.path);
+			String responseSpeed = Utils.formatSpeed(responseLength, now - responseStart);
+			WebShare.log(error, "request: %s; response: %s @ %s: `%s`", requestTime, responseTime, responseSpeed, request.path);
 		}
 	}
 }

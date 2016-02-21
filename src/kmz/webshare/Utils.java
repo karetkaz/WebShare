@@ -18,40 +18,6 @@ public class Utils {
 
 	private static final int[] base64 = { 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 62, 64, 64, 64, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 64, 64, 64, 64, 64, 64, 64, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 64, 64, 64, 64, 64, 64, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64 };
 
-	public static class TeeInputStream extends InputStream {
-		private final InputStream in;
-		private final ByteArrayOutputStream text = new ByteArrayOutputStream();
-
-		public TeeInputStream(InputStream in) {
-			this.in = in;
-		}
-
-		public int read() throws IOException {
-			int ret = in.read();
-			text.write(ret);
-			text.flush();
-			return ret;
-		}
-
-		public int read(byte[] b, int off, int len) throws IOException {
-			int ret = in.read(b, off, len);
-			if (ret != -1) {
-				text.write(b, off, ret);
-				text.flush();
-			}
-			return ret;
-		}
-
-		public void close() throws IOException {
-			in.close();
-			text.close();
-		}
-
-		public String toString() {
-			return text.toString();
-		}
-	}
-
 	public static boolean isNullOrEmpty(String value) {
 		return value == null || value.isEmpty();
 	}
@@ -120,46 +86,48 @@ public class Utils {
 		return dateFormat.format(new Date(value));
 	}
 
-	public static String formatTime(long value) {
-		if (value > TimeUnit.MINUTES.toMillis(1)) {
-			double val = (double)value / TimeUnit.MINUTES.toMillis(1);
+	public static String formatTime(long millis) {
+		if (millis > TimeUnit.MINUTES.toMillis(1)) {
+			double val = (double)millis / TimeUnit.MINUTES.toMillis(1);
 			return String.format("%.2f min", val);
 		}
-		if (value > TimeUnit.SECONDS.toMillis(1)) {
-			double val = (double)value / TimeUnit.SECONDS.toMillis(1);
+		if (millis > TimeUnit.SECONDS.toMillis(1)) {
+			double val = (double)millis / TimeUnit.SECONDS.toMillis(1);
 			return String.format("%.2f sec", val);
 		}
-		double val = (double)value / TimeUnit.MILLISECONDS.toMillis(1);
-		return String.format("%.2f ms", val);
+		return String.format("%d ms", millis);
 	}
 
-	public static String formatSize(long sizeBytes) {
-		if (sizeBytes > (1 << 30)) {
-			return String.format("%.2f GB", (double) sizeBytes / (1 << 30));
+	public static String formatSize(long bytes) {
+		if (bytes > (1 << 30)) {
+			return String.format("%.2f GB", (double) bytes / (1 << 30));
 		}
-		if (sizeBytes > (1 << 20)) {
-			return String.format("%.2f MB", (double) sizeBytes / (1 << 20));
+		if (bytes > (1 << 20)) {
+			return String.format("%.2f MB", (double) bytes / (1 << 20));
 		}
-		if (sizeBytes > (1 << 10)) {
-			return String.format("%.2f KB", (double) sizeBytes / (1 << 10));
+		if (bytes > (1 << 10)) {
+			return String.format("%.2f KB", (double) bytes / (1 << 10));
 		}
-		return String.format("%d Bytes", sizeBytes);
+		return String.format("%d Bytes", bytes);
 	}
 
-	public static String formatSpeed(long sizeBytes, long timeMillis) {
-		if (timeMillis > 0) {
-			sizeBytes = sizeBytes * 1000 / timeMillis;
+	public static String formatSpeed(long bytes, long millis) {
+		if (bytes <= 0) {
+			return "? Bytes/s";
 		}
-		if (sizeBytes > (1 << 30)) {
-			return String.format("%.2f GB/s", (double) sizeBytes / (1 << 30));
+		if (millis > 0) {
+			bytes = bytes * 1000 / millis;
 		}
-		if (sizeBytes > (1 << 20)) {
-			return String.format("%.2f MB/s", (double) sizeBytes / (1 << 20));
+		if (bytes > (1 << 30)) {
+			return String.format("%.2f GB/s", (double) bytes / (1 << 30));
 		}
-		if (sizeBytes > (1 << 10)) {
-			return String.format("%.2f KB/s", (double) sizeBytes / (1 << 10));
+		if (bytes > (1 << 20)) {
+			return String.format("%.2f MB/s", (double) bytes / (1 << 20));
 		}
-		return String.format("%d Bytes/s", sizeBytes);
+		if (bytes > (1 << 10)) {
+			return String.format("%.2f KB/s", (double) bytes / (1 << 10));
+		}
+		return String.format("%d Bytes/s", bytes);
 	}
 
 	public static String base64Decode(String orig) {

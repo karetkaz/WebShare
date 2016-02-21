@@ -126,11 +126,11 @@
 					}
 				}
 
-				if (document.location.href.endsWith("?recursive")) {
-					path += ' : <a href="' + document.location.origin + document.location.pathname + '">Tree</a>';
+				if (document.location.href.match("\\?recursive$")) {
+					path += ' : <a href="' + document.location.pathname + '">Tree</a>';
 				}
 				else {
-					path += ' : <a href="' + document.location.href + '?recursive">Flat</a>';
+					path += ' : <a href="' + document.location.pathname + '?recursive">Flat</a>';
 				}
 				document.getElementById('toolbarMessage').innerHTML = path;
 			}

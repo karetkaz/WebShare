@@ -208,7 +208,11 @@ public class HtmlTemplate {
 		HtmlTemplate template = blocks.get(0);
 		if (template.value != null) {
 			// flush previous values.
-			template.append(template.value);
+			try {
+				// StringBuffer should not throw IOException.
+				template.append(template.value);
+			}
+			catch (IOException ignore) {}
 		}
 		else {
 			template.value = new StringBuffer();
@@ -235,32 +239,18 @@ public class HtmlTemplate {
 		}
 	}
 
-	private void append(StringBuffer sb) {
-		if (this.value == null) {
-			// hidden block
-			return;
-		}
-
-		if (sb != this.value) {
-			sb.append(this.value);
-		}
-		if (this.content != null) {
-			for (HtmlTemplate blocks : this.content) {
-				blocks.append(sb);
-			}
-		}
-	}
-
-	public Writer write(Writer out) throws IOException {
+	public Appendable append(Appendable out) throws IOException {
 		if (this.value == null) {
 			// hidden block
 			return out;
 		}
 
-		out.write(this.value.toString());
+		if (out != this.value) {
+			out.append(this.value);
+		}
 		if (this.content != null) {
 			for (HtmlTemplate blocks : this.content) {
-				blocks.write(out);
+				blocks.append(out);
 			}
 		}
 		return out;
@@ -270,10 +260,9 @@ public class HtmlTemplate {
 	public String toString() {
 		StringWriter result = new StringWriter();
 		try {
-			this.write(result);
-		} catch (IOException e) {
-			result.write(e.getMessage());
+			this.append(result);
 		}
+		catch (IOException ignore) {}
 		return result.toString();
 	}
 }

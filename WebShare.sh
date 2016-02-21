@@ -1,5 +1,5 @@
 #!/bin/sh
-## usage java -jar server.jar [arguments] <shared_path>
+## usage java -jar WebShare.jar [arguments] <shared_path>
 ## -host <string>: override default: -host 'http://localhost'.
 ## -port <number>: override default: -port '8090'.
 ## -auth <string>: require username and password. ex: -auth 'User:secret1'.
@@ -11,7 +11,7 @@
 cd "$(dirname "$(readlink -f "$0")")"
 PATH=$JAVA_HOME/bin:$PATH
 
-if [ ! -e server.jar ]
+if [ ! -e WebShare.jar ]
 then
 	mkdir "out"
 	echo compiling server ...
@@ -19,13 +19,13 @@ then
 	cd out
 	jar xf "../lib/sceye-fi.jar"
 	cd ..
-	jar cvfe "server.jar" kmz.webshare.WebShare -C out/ . mime.map FileList.html
+	jar cvfe "WebShare.jar" kmz.webshare.WebShare -C out/ . mime.map FileList.html
 fi
 
 
-#~ java -jar server.jar -write $*
-java -jar server.jar $*
+#~ java -jar WebShare.jar -write $*
+java -jar WebShare.jar -write -port 8090 $*
 
 ## using as a file caching proxy: all visited pages will be saved locally
 #~ REPO="https://qmlbook.github.io"
-#~ java -jar server.jar -repo $REPO -write './qmlbook.github.io'
+#~ java -jar WebShare.jar -repo $REPO -write './qmlbook.github.io'

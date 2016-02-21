@@ -220,20 +220,19 @@ public class WebShare extends HttpServer {
 	}
 
 	@Override
-	public File beginRequest(Request request) throws HttpServer.Error {
-		request.putExtra(DOWNLOAD, null);
-		request.putExtra(POST_CMD_FILENAME, null);
+	public boolean beginRequest(Request request) throws HttpServer.Error {
+		// no favicon for this server.
+		if (request.path.equals("/favicon.ico")) {
+			return false;
+		}
 
 		File file = request.getLocalPath();
-
-		// no favicon for this server.
-		/*if (request.path.equals("/favicon.ico")) {
-			//return;
-			throw new HttpServer.Error("No favicon");
-		}*/
+		if (file == null || !file.exists()) {
+			throw new HttpServer.Error(404, "File not found", null);
+		}
 
 		log("request: %s[%s]: `%s`", request.method, getContentLength(request, file), file.getAbsolutePath());
-		return null;
+		return true;
 	}
 
 	@Override
@@ -263,17 +262,20 @@ public class WebShare extends HttpServer {
 			}
 			String value = Utils.readStream(body);
 			if (!Utils.isNullOrEmpty(value)) {
-				for (String fileName : value.split("\n")) {
+				for (String fileName : value.split("[\r\n]+")) {
+					fileName = fileName.trim();
+					if (fileName.isEmpty()) {
+						continue;
+					}
+
 					File file = new File(request.getLocalPath(), fileName);
-
 					if (!file.exists()) {
-						throw new HttpServer.Error("File does not exists: " + file.getAbsolutePath());
+						throw new HttpServer.Error("File does not exists: " + fileName);
 					}
-
-					log("deleted: `%s`", file.getAbsolutePath());
 					if (!file.delete()) {
-						throw new HttpServer.Error("Can not delete file.");
+						throw new HttpServer.Error("Can not delete file: " + fileName);
 					}
+					log("deleted: `%s`", file.getAbsolutePath());
 				}
 			}
 		}
@@ -281,20 +283,16 @@ public class WebShare extends HttpServer {
 		else if (DOWNLOAD.equals(name)) {
 			String value = Utils.readStream(body);
 			if (!Utils.isNullOrEmpty(value)) {
-				String[] files = value.split("\n");
 				List<File> toZip = new ArrayList<File>();
-
-				for (String file1 : files) {
-
-					// skip empty strings produced by: split("a//b/")
-					if (file1 == null || file1.isEmpty()) {
+				for (String fileName : value.split("[\r\n]+")) {
+					fileName = fileName.trim();
+					if (fileName.isEmpty()) {
 						continue;
 					}
 
-					File file = new File(request.getLocalPath(), file1.trim());
-
+					File file = new File(request.getLocalPath(), fileName);
 					if (!file.exists()) {
-						throw new java.lang.Error("File does not exists: " + file.getAbsolutePath());
+						throw new java.lang.Error("File does not exists: " + fileName);
 					}
 					toZip.add(file);
 				}
@@ -355,7 +353,7 @@ public class WebShare extends HttpServer {
 	}
 
 	@Override
-	public void writeResponse(Response response, Exception error) throws IOException {
+	public long writeResponse(Response response, Exception error) throws IOException {
 		File file = response.getLocalPath();
 
 		File[] download = (File[]) response.getExtra(DOWNLOAD);
@@ -374,7 +372,7 @@ public class WebShare extends HttpServer {
 					// do not zip a single file, just download it
 					response.setAttachment(file.getName());
 					response.write(file);
-					return;
+					return file.length();
 				}
 			}
 
@@ -384,16 +382,12 @@ public class WebShare extends HttpServer {
 
 			response.setAttachment(zipName + ".zip");
 			response.writeZip(download);
-			return;
+			return 0;
 		}
 
 		if (file.isFile()) {
 			response.write(file);
-			return;
-		}
-
-		if (!file.exists()) {
-			error = new Exception("File not found");
+			return file.length();
 		}
 
 		template.reset();
@@ -438,6 +432,7 @@ public class WebShare extends HttpServer {
 				Arrays.sort(files, new Comparator<File>() {
 					@Override
 					public int compare(File lhs, File rhs) {
+						// Directories on top
 						if (lhs.isDirectory() != rhs.isDirectory()) {
 							return lhs.isDirectory() ? -1 : 1;
 						}
@@ -474,6 +469,7 @@ public class WebShare extends HttpServer {
 			response.setResponseCode(HttpURLConnection.HTTP_INTERNAL_ERROR);
 		}
 		response.write(template);
+		return 0;
 	}
 
 	@Override
