@@ -1,7 +1,20 @@
 # WebShare
 Simple file sharing over http.
 
-For windows just drag a folder over the Websare.cmd to share it.
-For linux users use WebShare.sh to share a folder.
+## Usage and options:
 
-To enable deleting and uploading files the Websare.cmd or WebShare.sh needs to be modified by adding the `-write` flag.
+Starting the application without a path, will start a basic swing ui.
+
+### Linux: WebShare.sh [arguments] \<shared_path>
+
+### Windows: WebShare.cmd [arguments] \<shared_path>
+
+### Arguments:
+
+- -repo \<url>: use as proxy, with write enabled caches the responses from server.
+- -host \<string>: override default: -host 'http://localhost'.
+- -port \<number>: override default: -port '8090'.
+- -auth \<string>: require username and password. ex: -auth 'UserName:pass123!'.
+- -log \<file>: output logs to the given file and console.
+- -n \<number>: override simultaneous requests: -n '256'.
+- -write: enable uploading, and deleting files in the shared directory.

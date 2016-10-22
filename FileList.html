@@ -195,8 +195,8 @@
 	<input name="filedata" id="filedata" type="file" multiple>
 </form>
 <form class="toolgroup right" method="POST" onsubmit="return dirSubmit();">
+	<input type="submit" onclick="onSubmit(this);" value="Download">
 	<span id="hideIfNoSelection">
-		<input type="submit" onclick="onSubmit(this);" value="Download">
 		<input type="submit" onclick="delSubmit(this);" value="Delete">
 	</span>
 	<input type="submit" onclick="mkdirSubmit(this);" value="Mkdir">
@@ -209,8 +209,8 @@
 </div>
 <!--.errorRow--><div class="error"><span>Error: <.message/></span></div><!--./errorRow-->
 <!--.fileRowFile-->
-<div class="content<.oddRow= odd/>">
-	<input class="colCheck colCheckSel" type="checkbox" onchange="selectcb(this);" value="<.href/>"/>
+<div class="content<.oddRow=' odd'/>">
+	<input class="colCheck colCheckSel" type="checkbox" onchange="selectcb(this);" value="<.name/>"/>
 	<span class="right"><.date/></span>
 	<a class="right" href="<.href/>?download"><.size/></a>
 	<a class="colName" href="<.href/>"><.name/></a>

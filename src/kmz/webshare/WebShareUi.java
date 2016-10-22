@@ -12,25 +12,8 @@ import javax.swing.*;
 import javax.swing.text.BadLocationException;
 
 public class WebShareUi extends JFrame {
-    /**
-     * The text area which is used for displaying logging information.
-     */
-
-    private static class CustomOutputStream extends OutputStream {
-        private JTextArea textArea;
-
-        public CustomOutputStream(JTextArea textArea) {
-            this.textArea = textArea;
-        }
-
-        @Override
-        public void write(int b) throws IOException {
-            // redirects data to the text area
-            textArea.append(String.valueOf((char)b));
-            // scrolls the text area to the end of data
-            textArea.setCaretPosition(textArea.getDocument().getLength());
-        }
-    }
+    final JCheckBox chkWritable;
+    String repoUrl = null;
 
     public WebShareUi() throws IOException {
         super("WebShare");
@@ -39,9 +22,6 @@ public class WebShareUi extends JFrame {
         textArea.setEditable(false);
         PrintStream printStream = new PrintStream(new CustomOutputStream(textArea));
 
-        // keeps reference of standard output stream
-        final PrintStream standardOut = System.out;
-
         // re-assigns standard output stream and error output stream
         System.setOut(printStream);
         System.setErr(printStream);
@@ -49,7 +29,9 @@ public class WebShareUi extends JFrame {
         final JButton btnStart = new JButton("Start");
         final JButton btnClear = new JButton("Clear");
         final JButton btnBrowse = new JButton("Browse");
-        final JCheckBox chkWritable = new JCheckBox("RW");
+        this.chkWritable = new JCheckBox("RW");
+        this.chkWritable.setHorizontalTextPosition(SwingConstants.LEFT);
+
         final JTextField workDir = new JTextField(new java.io.File(".").getCanonicalPath());
 
         // creates the GUI
@@ -105,14 +87,16 @@ public class WebShareUi extends JFrame {
         btnStart.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent evt) {
-                ArrayList<String> args = new ArrayList<String>();
-                //args.add("-repo"); args.add("http://www.url.dom");
+                ArrayList<String> args = new ArrayList<>();
                 //args.add("-host"); args.add("localhost");
                 //args.add("-port"); args.add("8090");
                 //args.add("-auth"); args.add("username:password");
                 //args.add("-log"); args.add("logFileName");
                 //args.add("-n"); args.add("2048");
-
+                if (WebShareUi.this.repoUrl != null) {
+                    args.add("-repo");
+                    args.add(WebShareUi.this.repoUrl);
+                }
                 if (chkWritable.isSelected()) {
                     args.add("-write");
                 }
@@ -147,8 +131,35 @@ public class WebShareUi extends JFrame {
 
         });
 
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         setSize(480, 320);
         setLocationRelativeTo(null); // centers on screen
+    }
+
+    public void setReadOnly(boolean readOnly) {
+        chkWritable.setSelected(!readOnly);
+    }
+
+    public void setRepoUrl(String repoUrl) {
+        this.repoUrl = repoUrl;
+    }
+
+    /**
+     * The text area which is used for displaying logging information.
+     */
+    private static class CustomOutputStream extends OutputStream {
+        private JTextArea textArea;
+
+        public CustomOutputStream(JTextArea textArea) {
+            this.textArea = textArea;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            // redirects data to the text area
+            textArea.append(String.valueOf((char)b));
+            // scrolls the text area to the end of data
+            textArea.setCaretPosition(textArea.getDocument().getLength());
+        }
     }
 }

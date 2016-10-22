@@ -12,11 +12,11 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.zip.CRC32;
+import java.util.Collections;
 
 public class HttpFileProxy implements HttpHandler {
+
+	private static final boolean DEBUG = false;
 
 	private final String repo;
 	private final boolean readOnly;
@@ -28,9 +28,9 @@ public class HttpFileProxy implements HttpHandler {
 		this.readOnly = server.readOnly;
 
 		// customize headers
-		this.remapHeaderKeys.put("Accept-encoding", null);	// gzipped content not supported
-		this.remapHeaderKeys.put("Origin", repo);
-		this.remapHeaderKeys.put("Host", repo);
+		server.headerMap.put("Accept-encoding", "");	// gzipped content not supported
+		server.headerMap.put("Origin", repo);
+		server.headerMap.put("Host", repo);
 	}
 
 	protected static void writeResponse(HttpExchange context, int responseCode, String string) throws IOException {
@@ -41,27 +41,46 @@ public class HttpFileProxy implements HttpHandler {
 	}
 
 	private void writeResponse(HttpExchange context, int responseCode, File file) throws IOException {
-		InputStream in = null;
+		FileInputStream in = null;
 		try {
+			String range = context.getRequestHeaders().getFirst(HttpServer.RANGE);
+			long start = 0, end = file.length();
+			if (range != null && range.startsWith("bytes=")) {
+				int startPos = 6;
+				int endPos = range.indexOf('-', 6);
+				start = Long.parseLong(range.substring(startPos, endPos));
+
+				if (endPos > 0 && endPos + 1 < range.length()) {
+					end = Math.min(end, Long.parseLong(range.substring(endPos + 1)));
+				}
+				String contentRange = String.format("bytes %d-%d/%d", start, end - 1, file.length());
+				context.getResponseHeaders().add(HttpServer.CONTENT_RANGE, contentRange);
+				WebShare.log("Range request: %d - %d: %s", start, end, range);
+				WebShare.log("Range response: %s", contentRange);
+			}
 			context.getResponseHeaders().add(HttpServer.CONTENT_TYPE, this.server.getContentType(file));
 			context.sendResponseHeaders(responseCode, file.length());
 
 			OutputStream out = context.getResponseBody();
 			in = new FileInputStream(file);
-			Utils.copyStream(out, in);
+			in.skip(start);
+			byte[] buff = new byte[1024];
+			while (start < end) {
+				int n = in.read(buff);
+				out.write(buff, 0, n);
+				start += n;
+			}
 		}
 		finally {
 			Utils.close(in);
 		}
 	}
 
-	private Map<String, String> remapHeaderKeys = new HashMap<String, String>();
-
 	private static class CloneOutputStream extends OutputStream {
 		final OutputStream output1;
 		final OutputStream output2;
 
-		public CloneOutputStream(OutputStream output1, OutputStream output2) {
+		CloneOutputStream(OutputStream output1, OutputStream output2) {
 			this.output1 = output1;
 			this.output2 = output2;
 		}
@@ -94,8 +113,8 @@ public class HttpFileProxy implements HttpHandler {
 		@Override
 		public void close() throws IOException {
 			super.close();
-			output1.close();
-			output2.close();
+			Utils.close(output1);
+			Utils.close(output2);
 		}
 	}
 
@@ -106,9 +125,20 @@ public class HttpFileProxy implements HttpHandler {
 		String path = context.getRequestURI().getPath();
 		String query = context.getRequestURI().getQuery();
 
+		WebShare.log("handle: %s", path);
 		File file = server.getLocalPath(path);
 		try {
-			if (file.exists() && !file.isDirectory()) {
+			// try to fallback to index.html
+			if (HttpServer.METHOD_GET.equals(method)) {
+				if (file.exists() && file.isDirectory()) {
+					file = new File(file, "index.html");
+				}
+				else if (path.endsWith("/")) {
+					file = new File(file, "index.html");
+				}
+			}
+
+			if (file.exists() && file.isFile()) {
 				// return it from disk no matter if POST or GET.
 				writeResponse(context, HttpURLConnection.HTTP_OK, file);
 				method = HttpServer.METHOD_CACHED;
@@ -116,14 +146,13 @@ public class HttpFileProxy implements HttpHandler {
 			}
 
 			// fallback to method directory
-			File file2 = server.getLocalPath(String.format("__%s%s", method, path));
-			if (file2.exists() && !file2.isDirectory()) {
+			File file2 = server.getLocalPath(String.format("__%s/%s", method, path));
+			if (file2.exists() && file2.isFile()) {
 				// return it from disk no matter if POST or GET.
 				writeResponse(context, HttpURLConnection.HTTP_OK, file2);
 				method = HttpServer.METHOD_CACHED;
 				return;
 			}
-
 
 			if (Utils.isNullOrEmpty(this.repo)) {
 				writeResponse(context, HttpURLConnection.HTTP_NOT_FOUND, "Not found");
@@ -132,109 +161,42 @@ public class HttpFileProxy implements HttpHandler {
 			// send request to repo backend
 			URL url = new URL(this.repo + context.getRequestURI());
 			HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-			CRC32 crc = new CRC32();
-			if (!Utils.isNullOrEmpty(query)) {
-				crc.update(query.getBytes());
-			}
 
 			conn.setRequestMethod(method);
-
-			// send request headers
-			for (String key : context.getRequestHeaders().keySet()) {
-				// set the Referer page
-				if (HttpServer.REFERER.equalsIgnoreCase(key)) {
-					String oldPath = URI.create(context.getRequestHeaders().getFirst(key)).getPath();
-					conn.setRequestProperty(key, URI.create(this.repo + oldPath).toString());
-					continue;
-				}
-				if (remapHeaderKeys.containsKey(key)) {
-					String headerValue = remapHeaderKeys.get(key);
-					if (headerValue != null) {
-						conn.setRequestProperty(key, headerValue);
-					}
-					continue;
-				}
-				conn.setRequestProperty(key, Utils.join(";", context.getRequestHeaders().get(key)));
-			}
+			copyRequestHeaders(context, conn);
 
 			// send request body
-			try {
-				// TODO: safe open and close streams
-				InputStream in = context.getRequestBody();
-				//Utils.copyStream(out, in);
+			sendRequestBody(context, conn);
 
-				int firstByte = in.read();
-				if (firstByte != -1) {
-					conn.setDoOutput(true);
-					OutputStream out = conn.getOutputStream();
-
-					crc.update(firstByte);
-					out.write(firstByte);
-					int len;
-					byte[] buff = new byte[1024];
-					while ((len = in.read(buff)) > 0) {
-						crc.update(buff, 0, len);
-						out.write(buff, 0, len);
-						Thread.yield();
-					}
-
-					out.close();
-				}
-				in.close();
-			}
-			catch (Exception e) {
-				WebShare.log(e, "Error forwarding request: `%s`", path);
-			}
-
-			// get response headers
-			for (String key : conn.getHeaderFields().keySet()) {
-				if (key == null) {
-					continue;
-				}
-				context.getResponseHeaders().add(key, Utils.join(";", conn.getHeaderFields().get(key)));
-			}
+			// get response code, headers, body
 			int responseCode = conn.getResponseCode();
-			context.sendResponseHeaders(responseCode, responseCode == 304 ? -1 : 0);//conn.getContentLengthLong());
-			context.getResponseHeaders().add(HttpServer.CONTENT_TYPE, conn.getContentType());
+			sendResponseHeaders(context, conn, responseCode);
 
-			// read and save response body
 			boolean cacheFile = !this.readOnly;
-			if (responseCode == 304) {
+			if (responseCode >= 300) {
 				cacheFile = false;
 			}
 
-			OutputStream out = context.getResponseBody();
-			if (cacheFile) {
-				if (!file.exists() || file.isDirectory()) {
-					String code = path;
-					if (code.endsWith("/")) {
-						code = code.substring(0, code.length() - 1);
-					}
-					if (code.startsWith("/")) {
-						code = code.substring(1, code.length());
-					}
-
-					// no query, no body, and not requesting a directory
-					if (crc.getValue() == 0 && !path.endsWith("/")) {
-						file = server.getLocalPath(String.format("%s", code));
-					}
-					else {
-						file = server.getLocalPath(String.format("__%s/%s.%08x", method, code, crc.getValue()));
-					}
-				}
-				if (!file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
-					throw new IOException("can not create path for: " + file.getAbsolutePath());
-				}
-				out = new CloneOutputStream(out, new FileOutputStream(file));
-			}
-
+			// read and save response body
 			InputStream in = null;
+			OutputStream out = null;
 			try {
+				out = context.getResponseBody();
+				if (cacheFile) {
+					if (!HttpServer.METHOD_GET.equals(method) || !Utils.isNullOrEmpty(query)) {
+						file = server.getLocalPath(String.format("__%s/%s.%08x", method, path, ts));
+					}
+					if (!file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
+						throw new IOException("can not create path for: " + file.getParentFile().getCanonicalPath());
+					}
+					out = new CloneOutputStream(out, new FileOutputStream(file));
+				}
+
 				in = conn.getInputStream();
 				Utils.copyStream(out, in);
 			}
 			catch (Exception e) {
-				WebShare.log(e);
+				//WebShare.log(e);
 			}
 			finally {
 				Utils.close(in);
@@ -247,7 +209,72 @@ public class HttpFileProxy implements HttpHandler {
 		finally {
 			context.close();
 			double time = (System.currentTimeMillis() - ts) / 1000.;
-			WebShare.log("%s[%f]: %s -> %s", method, time , context.getRequestURI().toString(), file.getAbsolutePath());
+			WebShare.log("%s[%f]: %s -> %s", method, time, context.getRequestURI().toString(), file.getAbsolutePath());
+		}
+	}
+
+	private void copyRequestHeaders(HttpExchange context, HttpURLConnection conn) {
+		for (String key : context.getRequestHeaders().keySet()) {
+
+			String original = context.getRequestHeaders().getFirst(key);
+			String value = server.remapHeader(key, original);
+
+			if (HttpServer.REFERER.equalsIgnoreCase(key)) {
+				String path = URI.create(original).getPath();
+				value = URI.create(this.repo + path).toString();
+			}
+
+			if (DEBUG && (value == null || !value.equals(original))) {
+				WebShare.log("header [%s]: `%s` => `%s`", key, original, value);
+			}
+
+			if (value == null || value.isEmpty()) {
+				// ignore header
+				continue;
+			}
+
+			conn.setRequestProperty(key, value);
+		}
+	}
+
+	private void sendResponseHeaders(HttpExchange context, HttpURLConnection conn, int responseCode) throws IOException {
+		for (String key : conn.getHeaderFields().keySet()) {
+			if (key == null) {
+				continue;
+			}
+			context.getResponseHeaders().put(key, conn.getHeaderFields().get(key));
+		}
+		context.getResponseHeaders().put(HttpServer.CONTENT_TYPE, Collections.singletonList(conn.getContentType()));
+		context.sendResponseHeaders(responseCode, conn.getHeaderFieldLong(HttpServer.CONTENT_LENGTH, 0));
+		//context.sendResponseHeaders(responseCode, responseCode == 304 ? -1 : 0);
+	}
+
+	private void sendRequestBody(HttpExchange context, HttpURLConnection conn) {
+		InputStream in = null;
+		OutputStream out = null;
+		try {
+			in = context.getRequestBody();
+			int firstByte = in.read();
+			if (firstByte != -1) {
+				conn.setDoOutput(true);
+				out = conn.getOutputStream();
+
+				out.write(firstByte);
+				int len;
+				byte[] buff = new byte[1024];
+				while ((len = in.read(buff)) > 0) {
+					out.write(buff, 0, len);
+					Thread.yield();
+				}
+			}
+		}
+		catch (Exception e) {
+			String path = context.getRequestURI().getPath();
+			WebShare.log(e, "Error forwarding request: `%s`", path);
+		}
+		finally {
+			Utils.close(in);
+			Utils.close(out);
 		}
 	}
 }

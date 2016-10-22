@@ -36,11 +36,15 @@ public abstract class HttpServer implements HttpHandler {
 			this.context = context;
 			this.method = context.getRequestMethod();
 			this.path = context.getRequestURI().getPath();
-			this.extras = new HashMap<String, Object>();
+			this.extras = new HashMap<>();
 		}
 
 		public File getLocalPath() {
 			return HttpServer.this.getLocalPath(this.path);
+		}
+
+		public File getLocalPath(String path) {
+			return new File(this.getLocalPath(), path);
 		}
 
 		public Object getExtra(String key) {
@@ -77,11 +81,8 @@ public abstract class HttpServer implements HttpHandler {
 		private final HttpExchange context;
 		private final Map<String, Object> extras;
 
-		private String attachment = null;
 		private String contentType = null;
 		private int responseCode = HttpURLConnection.HTTP_OK;
-		private boolean headersSent = false;
-		//public int reasonPhrase;
 
 		public Response(Request request) {
 			this.context = request.context;
@@ -109,10 +110,6 @@ public abstract class HttpServer implements HttpHandler {
 			this.contentType = contentType;
 		}
 
-		public void setAttachment(String attachment) {
-			this.attachment = attachment;
-		}
-
 		public Headers getHeaders() {
 			return this.context.getResponseHeaders();
 		}
@@ -131,7 +128,7 @@ public abstract class HttpServer implements HttpHandler {
 
 		private void sendResponseHeaders(long responseLength) throws IOException {
 			this.context.sendResponseHeaders(this.responseCode, responseLength);
-			this.headersSent = true;
+			//this.headersSent = true;
 		}
 
 		public void write(String string) throws IOException {
@@ -141,14 +138,14 @@ public abstract class HttpServer implements HttpHandler {
 			this.context.getResponseBody().write(response);
 		}
 
-		public void write(File file) throws IOException {
+		public long write(String attachment, File file) throws IOException {
 			InputStream in = null;
 			if (this.contentType == null) {
 				this.contentType = HttpServer.this.getContentType(file);
 			}
 			try {
-				if (this.attachment != null) {
-					context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + this.attachment);
+				if (attachment != null) {
+					context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + attachment);
 				}
 				this.context.getResponseHeaders().add(CONTENT_TYPE, this.contentType);
 				this.sendResponseHeaders(file.length());
@@ -160,11 +157,51 @@ public abstract class HttpServer implements HttpHandler {
 			finally {
 				Utils.close(in);
 			}
+			return file.length();
 		}
 
-		public void writeZip(File... files) throws IOException {
-			if (this.attachment != null) {
-				this.context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + this.attachment);
+		/*public void writeRange(File file) throws IOException {
+			InputStream in = null;
+			if (this.contentType == null) {
+				this.contentType = HttpServer.this.getContentType(file);
+			}
+			try {
+				String range = context.getRequestHeaders().getFirst(HttpServer.RANGE);
+				long start = 0, end = file.length();
+				if (range != null && range.startsWith("bytes=")) {
+					int startPos = 6;
+					int endPos = range.indexOf('-', 6);
+					start = Long.parseLong(range.substring(startPos, endPos));
+
+					if (endPos > 0 && endPos + 1 < range.length()) {
+						end = Math.min(end, Long.parseLong(range.substring(endPos + 1)));
+					}
+					String contentRange = String.format("bytes %d-%d/%d", start, end - 1, file.length());
+					context.getResponseHeaders().add(HttpServer.CONTENT_RANGE, contentRange);
+					WebShare.log("Range request: %d - %d: %s", start, end, range);
+					WebShare.log("Range response: %s", contentRange);
+				}
+				this.context.getResponseHeaders().add(CONTENT_TYPE, this.contentType);
+				this.sendResponseHeaders(file.length());
+
+				OutputStream out = this.context.getResponseBody();
+				in = new FileInputStream(file);
+				in.skip(start);
+				byte[] buff = new byte[1024];
+				while (start < end) {
+					int n = in.read(buff);
+					out.write(buff, 0, n);
+					start += n;
+				}
+			}
+			finally {
+				Utils.close(in);
+			}
+		}*/
+
+		public long writeZip(String attachment, File... files) throws IOException {
+			if (attachment != null) {
+				this.context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + attachment);
 			}
 			this.context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_ARCHIVE_ZIP);
 			this.sendResponseHeaders(0);
@@ -179,14 +216,16 @@ public abstract class HttpServer implements HttpHandler {
 			finally {
 				Utils.close(out);
 			}
+			return 0;
 		}
 
-		public void write(HtmlTemplate template) throws IOException {
+		public long write(HtmlTemplate template) throws IOException {
 			this.context.getResponseHeaders().add(CONTENT_TYPE, CONTENT_TYPE_TEXT_HTML_CHARSET);
 			this.sendResponseHeaders(0);
 			Writer out = new OutputStreamWriter(this.context.getResponseBody());
 			template.append(out);
 			out.flush();
+			return 0;
 		}
 	}
 
@@ -207,9 +246,11 @@ public abstract class HttpServer implements HttpHandler {
 		}
 	}
 
+	protected abstract File getLocalPath(String path);
+
 	protected abstract String getContentType(File file);
 
-	protected abstract File getLocalPath(String path);
+	protected abstract String remapHeader(String key, String value);
 
 	// Enforce to be authenticated.
 	abstract boolean isAuthenticated(Request request);
@@ -223,19 +264,21 @@ public abstract class HttpServer implements HttpHandler {
 	// handle write response to client.
 	abstract long writeResponse(Response response, Exception error) throws IOException;
 
+	public static final String RANGE = "Range";
 	public static final String REFERER = "Referer";
 
-	//public static final String METHOD_GET = "GET";
+	public static final String METHOD_GET = "GET";
 	public static final String METHOD_POST = "POST";
 	public static final String METHOD_CACHED = "FILE";
 	public static final String DEFAULT_ENCODING = "UTF-8";
 
 	protected static final String CONTENT_TYPE = "Content-type";
+	protected static final String CONTENT_RANGE = "Content-range";
 	protected static final String CONTENT_LENGTH = "Content-length";
 	protected static final String CONTENT_DISPOSITION = "content-disposition";
 
 	protected static final String CONTENT_TYPE_ARCHIVE_ZIP = "application/zip";
-	protected static final String CONTENT_TYPE_OCTET_STREAM = "application/octet-stream";
+	//protected static final String CONTENT_TYPE_OCTET_STREAM = "application/octet-stream";
 	protected static final String CONTENT_TYPE_URL_ENCODED_FORM = "application/x-www-form-urlencoded";
 
 	protected static final String CONTENT_TYPE_TEXT_HTML_CHARSET = "text/html; charset=" + DEFAULT_ENCODING;
@@ -273,8 +316,8 @@ public abstract class HttpServer implements HttpHandler {
 		long responseLength = -1;
 		final Request request = new Request(context);
 		final Response response = new Response(request);
-		try {
 
+		try {
 			if (!this.isAuthenticated(request)) {
 				response.putHeader("WWW-Authenticate", "Basic realm=\"Home Server\"");
 				response.setResponseCode(HttpURLConnection.HTTP_UNAUTHORIZED);
@@ -326,7 +369,7 @@ public abstract class HttpServer implements HttpHandler {
 					}
 					else if (CONTENT_TYPE_URL_ENCODED_FORM.equals(contentType)) {
 						// process form data params.
-						this.processParam(request, Utils.readStream(input));
+						this.processParam(request, Utils.toString(input));
 					}
 					else {
 						throw new Exception("content type not known: " + contentType);
@@ -341,26 +384,21 @@ public abstract class HttpServer implements HttpHandler {
 			responseLength = this.writeResponse(response, error);
 		}
 		catch (Exception e) {
-			/*// send only error if exception was not thrown before sending headers.
-			if (!response.headersSent) {
-				try {
-					response.setResponseCode(HttpURLConnection.HTTP_INTERNAL_ERROR);
-					response.write(e.getMessage());
-				}
-				catch (Exception e1) {
-					WebShare.log(e1);
-				}
-			}// */
-			//WebShare.log(e);
+			// error sending response
 			error = e;
 		}
 		finally {
 			context.close();
 			long now = System.currentTimeMillis();
-			String requestTime = Utils.formatTime(now - requestStart);
-			String responseTime = Utils.formatTime(now - responseStart);
-			String responseSpeed = Utils.formatSpeed(responseLength, now - responseStart);
-			WebShare.log(error, "request: %s; response: %s @ %s: `%s`", requestTime, responseTime, responseSpeed, request.path);
+			String responseTime = Utils.formatTime(now - requestStart);
+			if (responseLength > 0) {
+				String responseSize = Utils.formatSize(responseLength);
+				String responseSpeed = Utils.formatSpeed(responseLength, now - responseStart);
+				WebShare.log(error, "response: %s in %s at %s: `%s`", responseSize, responseTime, responseSpeed, request.path);
+			}
+			else {
+				WebShare.log(error, "response: in %s: `%s`", responseTime, request.path);
+			}
 		}
 	}
 }
