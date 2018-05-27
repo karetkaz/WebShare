@@ -21,9 +21,10 @@ then
 	jar xf "../lib/sceye-fi.jar"
 	cd ..
 	jar cvfe "WebShare.jar" kmz.webshare.WebShare -C out/ . mime.map FileList.html
+	chmod +x "WebShare.jar"
 fi
 
-#~ java -jar WebShare.jar -write "$@"
+#java -jar WebShare.jar -write "$@"
 java -jar WebShare.jar "$@"
 
 ## using as a file caching proxy: all visited pages will be saved locally

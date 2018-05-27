@@ -144,30 +144,11 @@ public abstract class HttpServer implements HttpHandler {
 				this.contentType = HttpServer.this.getContentType(file);
 			}
 			try {
+				long start = 0, end = file.length();
 				if (attachment != null) {
 					context.getResponseHeaders().add(CONTENT_DISPOSITION, "attachment; filename=" + attachment);
 				}
-				this.context.getResponseHeaders().add(CONTENT_TYPE, this.contentType);
-				this.sendResponseHeaders(file.length());
-
-				OutputStream out = this.context.getResponseBody();
-				in = new FileInputStream(file);
-				Utils.copyStream(out, in);
-			}
-			finally {
-				Utils.close(in);
-			}
-			return file.length();
-		}
-
-		/*public void writeRange(File file) throws IOException {
-			InputStream in = null;
-			if (this.contentType == null) {
-				this.contentType = HttpServer.this.getContentType(file);
-			}
-			try {
 				String range = context.getRequestHeaders().getFirst(HttpServer.RANGE);
-				long start = 0, end = file.length();
 				if (range != null && range.startsWith("bytes=")) {
 					int startPos = 6;
 					int endPos = range.indexOf('-', 6);
@@ -178,26 +159,28 @@ public abstract class HttpServer implements HttpHandler {
 					}
 					String contentRange = String.format("bytes %d-%d/%d", start, end - 1, file.length());
 					context.getResponseHeaders().add(HttpServer.CONTENT_RANGE, contentRange);
-					WebShare.log("Range request: %d - %d: %s", start, end, range);
-					WebShare.log("Range response: %s", contentRange);
+					this.setResponseCode(HttpURLConnection.HTTP_PARTIAL);
+
+					WebShare.log("Range request: %s, response: %s", range, contentRange);
 				}
 				this.context.getResponseHeaders().add(CONTENT_TYPE, this.contentType);
-				this.sendResponseHeaders(file.length());
+				this.sendResponseHeaders(end - start);
 
 				OutputStream out = this.context.getResponseBody();
 				in = new FileInputStream(file);
-				in.skip(start);
 				byte[] buff = new byte[1024];
+				start = in.skip(start);
 				while (start < end) {
 					int n = in.read(buff);
 					out.write(buff, 0, n);
 					start += n;
 				}
+				return end - start;
 			}
 			finally {
 				Utils.close(in);
 			}
-		}*/
+		}
 
 		public long writeZip(String attachment, File... files) throws IOException {
 			if (attachment != null) {

@@ -196,7 +196,7 @@ public class HttpFileProxy implements HttpHandler {
 				Utils.copyStream(out, in);
 			}
 			catch (Exception e) {
-				//WebShare.log(e);
+				WebShare.log(e, "Error");
 			}
 			finally {
 				Utils.close(in);
